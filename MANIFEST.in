@@ -1,0 +1,7 @@
+include LICENSE
+include PLAN.md
+include PROTOCOL.md
+include INTEROP.md
+include install.sh
+include agents/rapp_projects_agent.py
+recursive-include schemas *.json

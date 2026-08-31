@@ -1,0 +1,49 @@
+[build-system]
+requires = ["setuptools>=77"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "rapp-projects"
+version = "0.1.0"
+description = "Product-neutral RAPP/1 project memory, handoff, takeover, and crash recovery"
+readme = "README.md"
+requires-python = ">=3.11"
+license = "MIT"
+license-files = ["LICENSE"]
+authors = [{ name = "Kody Wildfeuer" }]
+keywords = ["agents", "collaboration", "handoff", "projects", "rapp"]
+classifiers = [
+  "Development Status :: 3 - Alpha",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
+  "Programming Language :: Python :: 3.14",
+  "Typing :: Typed",
+]
+dependencies = ["rapp-sdk>=0.2.0"]
+
+[project.optional-dependencies]
+test = ["pytest>=8,<9"]
+
+[project.scripts]
+rapp-projects = "rapp_projects.cli:main"
+
+[project.urls]
+Homepage = "https://github.com/kody-w/rapp-projects"
+Repository = "https://github.com/kody-w/rapp-projects"
+Issues = "https://github.com/kody-w/rapp-projects/issues"
+
+[tool.setuptools]
+package-dir = { "" = "src" }
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+rapp_projects = ["py.typed"]
+
+[tool.setuptools.data-files]
+"share/rapp-projects" = ["PROTOCOL.md", "INTEROP.md", "PLAN.md"]
+"share/rapp-projects/agents" = ["agents/rapp_projects_agent.py"]
+"share/rapp-projects/schemas" = ["schemas/rapp-projects-v1.schema.json"]

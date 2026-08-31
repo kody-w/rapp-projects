@@ -1,0 +1,40 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/kody-w/rapp-projects/schemas/rapp-projects-v1.schema.json",
+  "title": "RAPP Projects payload",
+  "type": "object",
+  "required": ["project"],
+  "properties": {
+    "project": {
+      "type": "string",
+      "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$"
+    },
+    "actor": {
+      "type": "object",
+      "required": ["id", "runtime", "session_id", "capabilities"],
+      "properties": {
+        "id": {"type": "string", "minLength": 1},
+        "runtime": {"type": "string", "minLength": 1},
+        "session_id": {"type": "string", "minLength": 1},
+        "model": {"type": "string"},
+        "host": {"type": "string"},
+        "capabilities": {
+          "type": "array",
+          "items": {"type": "string"}
+        }
+      },
+      "additionalProperties": false
+    },
+    "source": {
+      "type": "object",
+      "required": ["uri", "sha256", "license"],
+      "properties": {
+        "uri": {"type": "string", "minLength": 1},
+        "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+        "license": {"type": "string", "minLength": 1}
+      },
+      "additionalProperties": false
+    }
+  },
+  "additionalProperties": true
+}
