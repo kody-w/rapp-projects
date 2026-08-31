@@ -93,7 +93,7 @@ def dispatch(store: ProjectStore, action: str, values: dict[str, object]):
             head=str(values.get("head") or ""),
             dirty_paths=values.get("dirty_paths") or [],
             commands=values.get("commands") or [],
-            artifacts=values.get("artifacts") or [],
+            artifacts=values.get("artifacts", []),
         )
         return _committed(store, frame)
     if action == "status":
@@ -102,7 +102,7 @@ def dispatch(store: ProjectStore, action: str, values: dict[str, object]):
             _actor(values),
             location=str(values.get("location") or os.getcwd()),
             status=str(values.get("status") or "working"),
-            artifacts=values.get("artifacts") or [],
+            artifacts=values.get("artifacts", []),
             blockers=values.get("blockers") or [],
             next_action=str(values.get("next_action") or ""),
             pct=int(values.get("pct") or 0),
@@ -131,7 +131,7 @@ def dispatch(store: ProjectStore, action: str, values: dict[str, object]):
             project,
             _actor(values),
             outcome=str(values.get("outcome") or "done"),
-            receipts=values.get("receipts") or [],
+            receipts=values.get("receipts", []),
             summary=str(values.get("summary") or ""),
         )
         return _committed(store, frame)
@@ -145,7 +145,7 @@ def dispatch(store: ProjectStore, action: str, values: dict[str, object]):
             adopted=values.get("adopted") or [],
             rejected=values.get("rejected") or [],
             summary=str(values.get("summary") or ""),
-            receipts=values.get("receipts") or [],
+            receipts=values.get("receipts", []),
         )
         return _committed(store, frame)
     if action == "policy":
@@ -173,7 +173,7 @@ def dispatch(store: ProjectStore, action: str, values: dict[str, object]):
             rejected=values.get("rejected") or [],
             action_classes=values.get("action_classes") or [],
             elapsed_seconds=int(values.get("elapsed_seconds") or 0),
-            receipts=values.get("receipts") or [],
+            receipts=values.get("receipts", []),
         )
         return _committed(store, frame)
     if action == "due":

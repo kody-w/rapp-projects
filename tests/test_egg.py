@@ -8,6 +8,7 @@ from pathlib import Path
 
 import pytest
 
+import rapp_projects.core as core_module
 from rapp_projects.core import Actor, ProjectError, ProjectStore
 
 
@@ -50,6 +51,33 @@ def test_project_egg_round_trip(tmp_path: Path) -> None:
     with zipfile.ZipFile(egg) as archive:
         assert "manifest.json" in archive.namelist()
         assert "frames/" in "\n".join(archive.namelist())
+
+
+def test_import_refuses_legacy_uri_receipt_before_project_creation(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    source = make_project(tmp_path / "source")
+    original = core_module._is_uri_receipt
+    monkeypatch.setattr(core_module, "_is_uri_receipt", lambda value: False)
+    source.punchout(
+        "portable",
+        actor("copilot-cli"),
+        outcome="done",
+        receipts=["https://example.com/proof.json"],
+        summary="Legacy live URL receipt.",
+    )
+    egg = source.export_egg("portable")
+    monkeypatch.setattr(core_module, "_is_uri_receipt", original)
+    imported = ProjectStore(tmp_path / "imported")
+
+    with pytest.raises(
+        ProjectError,
+        match="project egg contains a URI receipt",
+    ):
+        imported.import_egg(egg)
+
+    assert not imported.project_path("portable").exists()
 
 
 def test_tampered_egg_is_refused(tmp_path: Path) -> None:

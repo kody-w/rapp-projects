@@ -11,6 +11,8 @@ import shutil
 import socket
 import threading
 import time
+from collections.abc import Iterable as IterableABC
+from collections.abc import Mapping as MappingABC
 from datetime import datetime, timezone
 from pathlib import Path, PurePosixPath
 from typing import Callable, Iterable, Mapping
@@ -35,6 +37,8 @@ FRAME_FILE = re.compile(r"^(?P<seq>[0-9]{20})-(?P<hash>[0-9a-f]{64})\.json$")
 SLUG = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
 HEX40 = re.compile(r"^[0-9a-f]{40}$")
 HEX64 = re.compile(r"^[0-9a-f]{64}$")
+URI_SCHEME = re.compile(r"^[A-Za-z][A-Za-z0-9+.-]*:")
+WINDOWS_DRIVE_PATH = re.compile(r"^[A-Za-z]:")
 DEFAULT_ROOT = Path(
     os.environ.get("RAPP_PROJECTS_ROOT", "~/.rapp/projects-control")
 ).expanduser()
@@ -192,6 +196,10 @@ Agents checkpoint exact resume state before risky operations and at every phase
 boundary. A hard power loss after an atomic frame rename loses no committed
 work. Another runtime may take over only after lease expiry or an explicit
 handoff. Historical frames are never rewritten.
+
+Receipt arrays accept local file paths. URI strings are refused before commit;
+freeze remote evidence into a local receipt file first. Import also refuses
+legacy eggs containing URI receipts before creating the project.
 """
 
 INTEROP_TEXT = """# Runtime interoperability
@@ -204,7 +212,27 @@ and humans use the same JSON payloads through `rapp-projects`.
 Each project continuously publishes `PROJECT.egg`, a verified portable snapshot
 containing frames and resume documents but not artifact bodies. Import refuses
 tampering and divergent histories.
+
+Artifacts and receipts are local file paths, not live URLs. A runtime must
+freeze remote evidence into a local file before recording it. Imported eggs
+containing URI receipts are refused before any project frame is written.
 """
+
+
+def _is_uri_receipt(value: str) -> bool:
+    candidate = value.lstrip()
+    return (
+        WINDOWS_DRIVE_PATH.match(candidate) is None
+        and URI_SCHEME.match(candidate) is not None
+    )
+
+
+def _receipt_items(values: object, field: str) -> tuple[object, ...]:
+    if isinstance(values, (str, bytes, os.PathLike, MappingABC)):
+        raise ProjectError(f"{field} must be an array of local file paths")
+    if not isinstance(values, IterableABC):
+        raise ProjectError(f"{field} must be an array of local file paths")
+    return tuple(values)
 
 
 def _receipt(
@@ -221,6 +249,11 @@ def _receipt(
         supplied = None
         scope = None
     display_path = str(source or "")
+    if _is_uri_receipt(display_path):
+        raise ProjectError(
+            "receipt must be a local file path, not a URI; "
+            "freeze remote evidence into a local receipt file first"
+        )
     if scope == "project":
         if project_root is None:
             raise ProjectError("project-relative receipt needs project_root")
@@ -255,6 +288,38 @@ def _event(frame: Mapping[str, object]) -> str:
     ):
         raise ProjectError("project frame has no event")
     return str(payload["event"])
+
+
+def _frame_receipt_values(frame: Mapping[str, object]) -> list[object]:
+    payload = frame["payload"]
+    event = _event(frame)
+    values: list[object] = []
+    if event in ("work.status", "work.checkpoint"):
+        raw = payload.get("artifacts")
+        if raw is not None:
+            values.extend(_receipt_items(raw, "artifacts"))
+    elif event == "work.handoff":
+        values.append(payload.get("document") or {})
+    elif event == "work.punchout":
+        raw = payload.get("receipts")
+        if raw is not None:
+            values.extend(_receipt_items(raw, "receipts"))
+    elif event in ("cell.absorb", "cell.cycle"):
+        raw = payload.get("receipts")
+        if raw is not None:
+            values.extend(_receipt_items(raw, "receipts"))
+    return values
+
+
+def _reject_uri_receipts(frames: Iterable[Mapping[str, object]]) -> None:
+    for frame in frames:
+        for value in _frame_receipt_values(frame):
+            source = value.get("path") if isinstance(value, Mapping) else value
+            if _is_uri_receipt(str(source or "")):
+                raise ProjectError(
+                    "project egg contains a URI receipt; "
+                    "freeze remote evidence into a local receipt file first"
+                )
 
 
 class ProjectStore:
@@ -572,6 +637,7 @@ class ProjectStore:
         commands: Iterable[str],
         artifacts: Iterable[str | Path | Mapping[str, object]],
     ) -> dict[str, object]:
+        artifact_items = _receipt_items(artifacts, "artifacts")
         checkpoint = Checkpoint(
             summary=summary,
             completed=tuple(completed),
@@ -584,7 +650,7 @@ class ProjectStore:
             head=head,
             dirty_paths=tuple(dirty_paths),
             commands=tuple(commands),
-            artifacts=tuple(_receipt(item) for item in artifacts),
+            artifacts=tuple(_receipt(item) for item in artifact_items),
         )
         return self._append(project, "work.checkpoint", {
             "project": _slug(project),
@@ -613,12 +679,13 @@ class ProjectStore:
             raise ProjectError("pct must be an integer")
         if not next_action.strip():
             raise ProjectError("next_action is required")
+        artifact_items = _receipt_items(artifacts, "artifacts")
         return self._append(project, "work.status", {
             "project": _slug(project),
             "actor": actor.as_payload(),
             "location": location,
             "status": status,
-            "artifacts": [_receipt(item) for item in artifacts],
+            "artifacts": [_receipt(item) for item in artifact_items],
             "blockers": [str(item) for item in blockers],
             "next_action": next_action,
             "pct": max(0, min(100, pct)),
@@ -732,11 +799,12 @@ class ProjectStore:
     ) -> dict[str, object]:
         if outcome not in ("done", "blocked", "abandoned"):
             raise ProjectError("invalid punchout outcome")
+        receipt_items = _receipt_items(receipts, "receipts")
         return self._append(project, "work.punchout", {
             "project": _slug(project),
             "actor": actor.as_payload(),
             "outcome": outcome,
-            "receipts": [_receipt(item) for item in receipts],
+            "receipts": [_receipt(item) for item in receipt_items],
             "summary": summary,
         }, validator=lambda state: self._require_actor(
             state,
@@ -902,6 +970,7 @@ class ProjectStore:
         adopted_values = [str(value) for value in adopted]
         if not adopted_values:
             raise ProjectError("absorb requires at least one adopted part")
+        receipt_items = _receipt_items(receipts, "receipts")
         return self._append(project, "cell.absorb", {
             "project": _slug(project),
             "actor": actor.as_payload(),
@@ -913,7 +982,7 @@ class ProjectStore:
             "adopted": adopted_values,
             "rejected": [str(value) for value in rejected],
             "summary": summary,
-            "receipts": [_receipt(value) for value in receipts],
+            "receipts": [_receipt(value) for value in receipt_items],
         }, validator=lambda state: self._require_actor(
             state,
             actor,
@@ -980,6 +1049,7 @@ class ProjectStore:
         if not isinstance(elapsed_seconds, int) or isinstance(elapsed_seconds, bool):
             raise ProjectError("elapsed_seconds must be an integer")
         classes = {str(value) for value in action_classes}
+        receipt_items = _receipt_items(receipts, "receipts")
         payload = {
             "project": _slug(project),
             "actor": actor.as_payload(),
@@ -990,7 +1060,7 @@ class ProjectStore:
             "rejected": [str(value) for value in rejected],
             "action_classes": sorted(classes),
             "elapsed_seconds": elapsed_seconds,
-            "receipts": [_receipt(value) for value in receipts],
+            "receipts": [_receipt(value) for value in receipt_items],
             "next_wakeup_utc": "",
         }
 
@@ -1062,18 +1132,7 @@ class ProjectStore:
         frames = self.frames(project)
         broken = []
         for frame in frames:
-            payload = frame["payload"]
-            event = _event(frame)
-            values = []
-            if event in ("work.status", "work.checkpoint"):
-                values.extend(payload.get("artifacts") or [])
-            elif event == "work.handoff":
-                values.append(payload.get("document") or {})
-            elif event == "work.punchout":
-                values.extend(payload.get("receipts") or [])
-            elif event in ("cell.absorb", "cell.cycle"):
-                values.extend(payload.get("receipts") or [])
-            for value in values:
+            for value in _frame_receipt_values(frame):
                 receipt = _receipt(
                     value,
                     project_root=self.project_path(project),
@@ -1493,6 +1552,7 @@ class ProjectStore:
                 raise ProjectError("project egg frame is not an object")
             incoming_frames.append(frame)
         verify_project_frames(incoming_frames, str(rappid))
+        _reject_uri_receipts(incoming_frames)
         project_path = self.project_path(project)
         incoming_hashes = [str(frame["frame_hash"]) for frame in incoming_frames]
         with _THREAD_LOCK, _file_lock(self.root / ".projects.lock"):

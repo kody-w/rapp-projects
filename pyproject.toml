@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "rapp-projects"
-version = "0.1.0"
+version = "0.1.1"
 description = "Product-neutral RAPP/1 project memory, handoff, takeover, and crash recovery"
 readme = "README.md"
 requires-python = ">=3.11"

@@ -59,6 +59,19 @@ even if every projection is missing.
 - commands already run;
 - artifact paths and content hashes.
 
+## Receipts
+
+Artifact and receipt arrays accept local file paths. URI strings such as
+`https://...`, `s3://...`, and `file://...` are refused before the frame is
+committed. A runtime must fetch or otherwise freeze remote evidence into a
+local receipt file, then record that file's path and content hash.
+
+This keeps verification deterministic and prevents a live URL from becoming
+an irreversible broken receipt when its content moves or the verifier is
+offline. Import refuses legacy eggs containing URI receipts before creating
+the project or writing any incoming frame. Provenance fields such as
+`cell.absorb.source_uri` remain valid because they are metadata, not receipts.
+
 ## Lease and takeover
 
 `work.punchin` and `work.heartbeat` declare `lease_expires_utc`.

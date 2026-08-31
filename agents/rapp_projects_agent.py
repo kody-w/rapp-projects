@@ -24,7 +24,7 @@ from rapp_projects.core import ProjectStore
 __manifest__ = {
     "schema": "rapp-agent/1.0",
     "name": "@rapp/rapp-projects",
-    "version": "0.1.0",
+    "version": "0.1.1",
     "display_name": "RAPP Projects",
     "description": (
         "Product-neutral RAPP/1 project hive for punch-in, checkpoints, "
@@ -35,7 +35,7 @@ __manifest__ = {
     "category": "productivity",
     "quality_tier": "community",
     "requires_env": [],
-    "dependencies": ["rapp-sdk>=0.2.0", "rapp-projects>=0.1.0"],
+    "dependencies": ["rapp-sdk>=0.2.0", "rapp-projects>=0.1.1"],
     "example_call": {"action": "board"},
 }
 
