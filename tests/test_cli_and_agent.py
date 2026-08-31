@@ -77,6 +77,79 @@ def test_cli_open_checkpoint_board_and_resume(tmp_path: Path) -> None:
     assert Path(board["board"]).is_file()
 
 
+def test_cli_refuses_url_receipt_without_committing(tmp_path: Path) -> None:
+    root = tmp_path / "control"
+    actor_values = {
+        "project": "cli-receipts",
+        "agent": "hermes",
+        "runtime": "hermes",
+        "session_id": "h1",
+        "capabilities": ["files"],
+    }
+    run_cli(
+        root,
+        "open",
+        "--json",
+        json.dumps({
+            "project": "cli-receipts",
+            "title": "CLI receipts",
+            "goal": "Reject live URLs",
+            "owner": "example",
+            "origin": "test",
+        }),
+    )
+    run_cli(
+        root,
+        "punchin",
+        "--json",
+        json.dumps({
+            **actor_values,
+            "location": "/workspace",
+            "intent": "record receipts",
+            "role": "builder",
+        }),
+    )
+    frames = root / "projects" / "cli-receipts" / "frames"
+    before = sorted(frames.iterdir())
+    env = dict(os.environ, RAPP_PROJECTS_ROOT=str(root))
+
+    for receipts, message in (
+        (
+            ["https://example.com/proof.json"],
+            "receipt must be a local file path, not a URI",
+        ),
+        (
+            "https://example.com/proof.json",
+            "receipts must be an array of local file paths",
+        ),
+    ):
+        result = subprocess.run(
+            [
+                sys.executable,
+                "-m",
+                "rapp_projects.cli",
+                "punchout",
+                "--json",
+                json.dumps({
+                    **actor_values,
+                    "outcome": "done",
+                    "receipts": receipts,
+                    "summary": "Remote proof is live.",
+                }),
+            ],
+            capture_output=True,
+            text=True,
+            env=env,
+            check=False,
+        )
+
+        assert result.returncode == 1
+        payload = json.loads(result.stdout)
+        assert payload["status"] == "error"
+        assert message in payload["message"]
+        assert sorted(frames.iterdir()) == before
+
+
 def test_brainstem_agent_loads_without_brainstem_package(tmp_path: Path) -> None:
     env = dict(os.environ, RAPP_PROJECTS_ROOT=str(tmp_path / "control"))
     result = subprocess.run(

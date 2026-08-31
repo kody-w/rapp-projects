@@ -8,7 +8,13 @@ from pathlib import Path
 
 import pytest
 
-from rapp_projects.core import Actor, ProjectError, ProjectStore
+from rapp_projects.core import (
+    Actor,
+    ProjectError,
+    ProjectStore,
+    _is_uri_receipt,
+    _receipt_items,
+)
 
 
 def actor(name: str, session: str = "s1") -> Actor:
@@ -447,6 +453,186 @@ def test_receipt_verification_records_failures(tmp_path: Path) -> None:
     verified = store.verify("alpha")
     assert verified["verdict"] == "fail"
     assert verified["broken_receipts"][0]["path"] == str(missing)
+
+
+@pytest.mark.parametrize(
+    "receipt",
+    (
+        "https://example.com/proof.json",
+        "s3://example-bucket/proof.json",
+        "file:///tmp/proof.json",
+        "file:/tmp/proof.json",
+        "urn:sha256:0123456789abcdef",
+        "data:text/plain,proof",
+        Path("file:/tmp/path-proof.json"),
+        Path("urn:sha256:path-proof"),
+        {"path": Path("data:text/plain,path-proof")},
+        " https://example.com/leading-space.json",
+        "\thttps://example.com/leading-tab.json",
+    ),
+)
+def test_uri_receipts_are_refused_before_commit(
+    tmp_path: Path,
+    receipt: str | Path | dict[str, Path],
+) -> None:
+    store = ProjectStore(tmp_path / "control")
+    open_project(store)
+    worker = actor("worker")
+    store.punchin(
+        "alpha",
+        worker,
+        location="/workspace",
+        intent="record receipts",
+        role="tester",
+    )
+    before = store.frames("alpha")
+
+    with pytest.raises(
+        ProjectError,
+        match="receipt must be a local file path, not a URI",
+    ):
+        store.punchout(
+            "alpha",
+            worker,
+            outcome="done",
+            receipts=[receipt],
+            summary="Remote proof is live.",
+        )
+
+    assert store.frames("alpha") == before
+
+
+@pytest.mark.parametrize(
+    "path",
+    (
+        r"C:\evidence\proof.json",
+        "C:/evidence/proof.json",
+        "C://evidence/proof.json",
+        r"C:relative\evidence\proof.json",
+        "C:relative/evidence/proof.json",
+        r"\\server\share\proof.json",
+    ),
+)
+def test_windows_paths_are_not_classified_as_uris(path: str) -> None:
+    assert not _is_uri_receipt(path)
+
+
+@pytest.mark.parametrize(
+    "value",
+    (
+        "https://example.com/proof.json",
+        b"https://example.com/proof.json",
+        Path("proof.json"),
+        {"path": "proof.json"},
+        None,
+    ),
+)
+def test_receipt_collections_reject_scalar_values(value: object) -> None:
+    with pytest.raises(
+        ProjectError,
+        match="receipts must be an array of local file paths",
+    ):
+        _receipt_items(value, "receipts")
+
+
+def test_all_receipt_apis_reject_scalar_collections_before_commit(
+    tmp_path: Path,
+) -> None:
+    store = ProjectStore(tmp_path / "control")
+    open_project(store)
+    worker = actor("worker")
+    store.punchin(
+        "alpha",
+        worker,
+        location="/workspace",
+        intent="record receipts",
+        role="tester",
+    )
+    store.set_cell_policy(
+        "alpha",
+        worker,
+        cadence_seconds=60,
+        may=["test"],
+        never=[
+            "send",
+            "sign",
+            "pay",
+            "purchase",
+            "delete_external",
+            "publish_remote",
+        ],
+        max_cycles=1,
+        max_seconds_per_cycle=30,
+        stop_conditions=["complete"],
+        human_gates=["external effect"],
+    )
+    bad = "https://example.com/proof.json"
+    operations = (
+        lambda: store.checkpoint(
+            "alpha",
+            worker,
+            summary="Checkpoint",
+            completed=[],
+            in_progress="testing",
+            next_action="continue",
+            resume_prompt="Continue.",
+            cwd="/workspace",
+            repository="https://github.com/example/repo",
+            branch="main",
+            head="a" * 40,
+            dirty_paths=[],
+            commands=[],
+            artifacts=bad,
+        ),
+        lambda: store.status(
+            "alpha",
+            worker,
+            location="/workspace",
+            status="testing",
+            artifacts=bad,
+            blockers=[],
+            next_action="continue",
+            pct=50,
+        ),
+        lambda: store.punchout(
+            "alpha",
+            worker,
+            outcome="done",
+            receipts=bad,
+            summary="Done.",
+        ),
+        lambda: store.absorb(
+            "alpha",
+            worker,
+            source_uri="https://github.com/example/source",
+            source_sha256="d" * 64,
+            source_license="MIT",
+            adopted=["retry policy"],
+            rejected=[],
+            summary="Absorbed provenance.",
+            receipts=bad,
+        ),
+        lambda: store.record_cell_cycle(
+            "alpha",
+            worker,
+            observations=[],
+            proposed=[],
+            applied=[],
+            rejected=[],
+            action_classes=["test"],
+            elapsed_seconds=1,
+            receipts=bad,
+        ),
+    )
+
+    for operation in operations:
+        before = store.frames("alpha")
+        with pytest.raises(
+            ProjectError,
+            match="must be an array of local file paths",
+        ):
+            operation()
+        assert store.frames("alpha") == before
 
 
 def test_repeated_handoffs_never_overwrite_evidence(tmp_path: Path) -> None:

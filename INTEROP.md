@@ -46,6 +46,11 @@ means no success should be inferred.
 - RAPP Brainstem: install `agents/rapp_projects_agent.py` and use `/chat`.
 - CI: checkpoint before a destructive stage and punch out with build artifacts.
 
+Receipt arrays contain local file paths, not live URLs. Freeze remote evidence
+into a local file before checkpointing or punching out so every runtime can
+verify the same bytes offline. Legacy eggs containing URI receipts are refused
+before import writes a project.
+
 ## Resume sequence
 
 1. Read `CATCHUP.md`.

@@ -41,7 +41,7 @@ def verify(label: str, artifact: pathlib.Path, sdk_wheel: pathlib.Path) -> None:
             env=env,
         )
         value = json.loads(probe)
-        assert value["version"] == "0.1.0"
+        assert value["version"] == "0.1.1"
         assert pathlib.Path(value["board"]).is_file()
         cli = subprocess.check_output(
             [str(python), "-m", "rapp_projects.cli", "board", "--json", "{}"],

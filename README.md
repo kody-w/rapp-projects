@@ -199,6 +199,9 @@ rapp-projects approve --json '{
 
 - GODD stays local by default.
 - Project eggs exclude artifact bodies; frames carry paths and hashes.
+- Receipt arrays accept local files, not live URLs; freeze remote evidence
+  locally before recording it. Legacy eggs with URI receipts are refused
+  before project creation.
 - Divergent histories are refused, never silently merged.
 - No project frame authorizes send, sign, pay, delete, or publish.
 - Derived views never override the verified frame record.
