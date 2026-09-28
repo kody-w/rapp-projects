@@ -209,6 +209,10 @@ rapp-projects approve --json '{
 - Divergent histories are refused, never silently merged.
 - No project frame authorizes send, sign, pay, delete, or publish.
 - Derived views never override the verified frame record.
+- Before every append, the store re-verifies the project's whole chain under
+  rapp-sdk's wall-clock budget (5 s by default). On a heavily loaded machine,
+  set `RAPP_PROJECTS_VERIFY_SECONDS` (for example `120`) to give the store's own
+  chains more time. Frames imported from other stores keep the default.
 
 ## Tests
 

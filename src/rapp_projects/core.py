@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import contextlib
 import hashlib
+import inspect
 import json
+import math
 import os
 import re
 import shutil
@@ -48,6 +50,11 @@ IRREVERSIBLE = {
     "send", "sign", "pay", "purchase", "delete_external", "publish_remote",
 }
 _THREAD_LOCK = threading.Lock()
+VERIFY_SECONDS_ENV = "RAPP_PROJECTS_VERIFY_SECONDS"
+try:
+    _SDK_TAKES_BUDGET = "max_seconds" in inspect.signature(verify_project_stream).parameters
+except (TypeError, ValueError):
+    _SDK_TAKES_BUDGET = False
 
 
 class ProjectError(RuntimeError):
@@ -82,11 +89,43 @@ def build_project_frame(
 def verify_project_frames(
     frames: list[Mapping[str, object]],
     expected_stream_id: str,
+    max_seconds: float | None = None,
 ):
+    """Verify a project stream; ``max_seconds`` replaces the SDK's wall-clock
+    budget when given and when the installed rapp-sdk supports one."""
     try:
+        if max_seconds is not None and _SDK_TAKES_BUDGET:
+            return verify_project_stream(
+                frames, expected_stream_id, max_seconds=max_seconds
+            )
         return verify_project_stream(frames, expected_stream_id)
     except Exception as exc:
         raise ProjectError(str(exc)) from exc
+
+
+def store_verify_seconds(
+    environ: Mapping[str, str] = os.environ,
+) -> float | None:
+    """The wall-clock budget a store grants itself to re-verify its own chains.
+
+    ``RAPP_PROJECTS_VERIFY_SECONDS``, when set, replaces the SDK default (5 s)
+    for the store's own frames only. Frames imported from elsewhere keep the
+    default. Unset, the store behaves exactly as before.
+    """
+    raw = str(environ.get(VERIFY_SECONDS_ENV, "")).strip()
+    if not raw:
+        return None
+    try:
+        value = float(raw)
+    except ValueError:
+        raise ProjectError(
+            f"{VERIFY_SECONDS_ENV} must be a number of seconds, not {raw!r}"
+        ) from None
+    if not math.isfinite(value) or value <= 0:
+        raise ProjectError(
+            f"{VERIFY_SECONDS_ENV} must be a positive number of seconds, not {raw!r}"
+        )
+    return value
 
 
 def _slug(value: str) -> str:
@@ -330,10 +369,14 @@ class ProjectStore:
         root: str | Path = DEFAULT_ROOT,
         *,
         clock: Callable[[], float] = time.time,
+        verify_seconds: float | None = None,
     ) -> None:
         self.root = Path(root).expanduser()
         self.projects_root = self.root / "projects"
         self.clock = clock
+        self.verify_seconds = (
+            store_verify_seconds() if verify_seconds is None else float(verify_seconds)
+        )
         self.last_projection_warning: str | None = None
         self._ensure_root()
         self.rebuild()
@@ -396,7 +439,7 @@ class ProjectStore:
                 raise ProjectError(f"frame filename hash mismatch: {path.name}")
             rows.append(value)
         if rows:
-            verify_project_frames(rows, stream_id)
+            verify_project_frames(rows, stream_id, self.verify_seconds)
             if [int(row["seq"]) for row in rows] != list(range(len(rows))):
                 raise ProjectError("frame filenames are not contiguous")
         return rows
