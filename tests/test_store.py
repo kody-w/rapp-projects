@@ -938,3 +938,52 @@ def test_rapp_cell_cycle_enforces_policy_and_time_budget(tmp_path: Path) -> None
             elapsed_seconds=31,
             receipts=[],
         )
+
+
+def test_a_store_grants_its_own_chains_the_configured_verify_budget(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from rapp_projects import core
+
+    seen: list[object] = []
+    real = core.verify_project_stream
+
+    def spy(frames, stream_id, **kwargs):
+        seen.append(kwargs.get("max_seconds"))
+        return real(frames, stream_id)
+
+    monkeypatch.setattr(core, "verify_project_stream", spy)
+    monkeypatch.setattr(core, "_SDK_TAKES_BUDGET", True)
+    monkeypatch.setenv("RAPP_PROJECTS_VERIFY_SECONDS", "120")
+    store = ProjectStore(tmp_path / "control")
+    open_project(store)
+    assert store.frames("alpha")
+    assert seen and set(seen) == {120.0}
+
+    seen.clear()
+    monkeypatch.delenv("RAPP_PROJECTS_VERIFY_SECONDS")
+    default = ProjectStore(tmp_path / "control")
+    assert default.frames("alpha")
+    assert seen and set(seen) == {None}, "unset keeps the SDK default"
+
+
+def test_the_verify_budget_reaches_the_sdk(tmp_path: Path) -> None:
+    from rapp_projects import core
+
+    if not core._SDK_TAKES_BUDGET:
+        pytest.skip("the installed rapp-sdk predates verification budgets")
+    store = ProjectStore(tmp_path / "control")
+    open_project(store)
+    store.verify_seconds = 0.0
+    with pytest.raises(ProjectError, match="verification-time-exceeded"):
+        store.frames("alpha")
+
+
+def test_the_verify_budget_must_be_a_positive_number() -> None:
+    from rapp_projects.core import store_verify_seconds
+
+    assert store_verify_seconds({}) is None
+    assert store_verify_seconds({"RAPP_PROJECTS_VERIFY_SECONDS": " 90 "}) == 90.0
+    for bad in ("soon", "0", "-5", "inf", "nan"):
+        with pytest.raises(ProjectError):
+            store_verify_seconds({"RAPP_PROJECTS_VERIFY_SECONDS": bad})
